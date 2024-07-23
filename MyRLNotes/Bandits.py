@@ -1,5 +1,5 @@
 """
-Code used partially adopted from RL web-notes: https://www.kaggle.com/code/parsasam/reinforcement-learning-notes-multi-armed-bandits
+Some code partially adapted from RL web-notes: https://www.kaggle.com/code/parsasam/reinforcement-learning-notes-multi-armed-bandits
 """
 
 import numpy as np
@@ -40,19 +40,19 @@ def UCB(Q, N, t, confidence=2):
     M = Q + confidence*np.sqrt(np.divide(np.log2(t), N))
     return softmax(M, temp=1)
 
-def SMUCB(Q, N, t, uncertParam, temp):
-    # print(N.size)
-    last_arm_reward = np.zeros(shape=N.size)
-    for i in range(N.size):
-        x = np.array(np.where(N[t] == i))
+def SMUCB(rewards, choices, trial, uncertParam, temp):
+    print(choices.size)
+    last_arm_reward = np.zeros(shape=choices.size)
+    for i in range(choices.size):
+        x = np.array(np.where(choices[0:trial] == i))
         if x.size == 0:
             last_arm_reward[i] = 0
         else:
             last_arm_reward = np.max(x)
-    uncert = (uncertParam * (t - last_arm_reward)) / 100
+    uncert = (uncertParam * (trial - last_arm_reward)) / 100
 
-    num = np.exp(np.multiply(Q + uncert, temp ))
-    denom = sum(np.exp(np.multiply(Q + uncert, temp)))
+    num = np.exp(np.multiply(rewards + uncert, temp ))
+    denom = sum(np.exp(np.multiply(rewards + uncert, temp)))
 
     return np.argmax(np.cumsum(num / denom) > np.random.rand())
 # def softmax_UCB(Q, N, t, temp)
@@ -60,7 +60,7 @@ def SMUCB(Q, N, t, uncertParam, temp):
 def softmax(qVal, temp):
     num = np.exp(np.multiply(qVal, temp))
     denom = sum(np.exp(np.multiply(qVal, temp)))
-    return np.argmax(np.cumsum(num / denom) > np.random.rand()) # return max arg where mac value is less than a randdom value chosen from a uniform distrubution
+    return np.argmax(np.cumsum(num / denom) > np.random.rand()) # return max arg where max value is less than a randdom value chosen from a uniform distrubution
 
 # TODO: Fix LL function
 def loglik_vect(x, *args):
@@ -151,15 +151,23 @@ class Bandit():
 
         #==========================================
 
+        # NOTE: Total Actions should be total correct actions as it tracks the correct arm choices of all sims
         self.total_rewards = np.zeros(trial_params[1])      # rewards array
         self.total_actions = np.zeros(trial_params[1])      # Choices array
+
+        self.selection_matrix = None                        # Contains all choice data for each step in each agent/problem
+        self.reward_matrix = None                           # Contains all reward data for each step in each agent/problem
+        self.predictionErr_matrix = None                    # Contains prediction error for each step in each agent/problem
 
         self.avg_rewards = None
         self.avg_actions = None
 
         self.final_N = None
     
-    def simulate(self, num_sim=1000, save=False) -> None:
+    def simulate(self, num_problems=1000, save=False) -> None:
+        pass
+
+    def simulate_LL(self, num_problems=1000, save=False) -> None:
         pass
 
     def show_results(self):
@@ -168,6 +176,10 @@ class Bandit():
         pass
             
 class EG_Bandit(Bandit):
+    """
+    eGreedy Bandit class that inherits all common attributes among the bandit models
+    Key Parameters: Epsilon, Alpha (learning rate)
+    """
     def __init__(self, model_params, trial_params, reward_values, start_val) -> None:
         super().__init__(model_params, trial_params, reward_values, start_val)
         self.model_type = "eGreedy"
@@ -175,7 +187,7 @@ class EG_Bandit(Bandit):
         self.k = trial_params[0]
         self.steps = trial_params[1]
 
-        self.alpha = model_params[0]           # if no alpha is passed of alpha=0, alg uses 1/n
+        self.alpha = model_params[0]           # if no alpha is passed of alpha=0, alg uses 1/n by default
         self.epsilon = model_params[1]
 
         self.q_star = reward_values
@@ -183,18 +195,33 @@ class EG_Bandit(Bandit):
 
         self.argmax_func = simple_max
 
-    def simulate(self, num_sim=1000, save=False) -> None:
-        for i in tqdm(range(num_sim)):
-            Q = np.ones(self.k) * self.initial_Q    # rewards array
+    def simulate(self, num_problems=1000, save=False) -> None:
+        # init matrices
+        # self.selection_matrix = np.zeros([num_problems])
+        # self.reward_matrix = np.zeros([num_problems])
+        # self.predictionErr_matrix = np.zeros([num_problems])
+
+        self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.predictionErr_matrix = np.empty(num_problems, dtype=np.ndarray)
+
+        for i in tqdm(range(num_problems)):
+            # Initialize Q Values
+            Q = np.ones(self.k) * self.initial_Q    # Qvalue array
+
+            # Initialize arm choice array
             N = np.zeros(self.k)                    # number of times each arm is chosen (choices)
             
             best_action = np.argmax(self.q_star[i])     # select best action for trial i
+
+            rewards_arr = np.zeros(self.steps)
             chosen_arm = np.zeros(self.steps, dtype=int)
+            prediction_error_arr = np.zeros(self.steps)
 
             # perform trial steps
             for time_t in range(self.steps):
                 if np.random.rand() < self.epsilon:
-                    a = np.random.randint(self.k)       #Explore
+                    a = np.random.randint(self.k)         #Explore
                 else:
                     a = self.argmax_func(Q, N, time_t)    #epxloit using chosen argmax_func ie. take best choice
 
@@ -206,8 +233,9 @@ class EG_Bandit(Bandit):
 
                 # Get prediction error
                 prediction_error = reward - Q[a]
+                prediction_error_arr[time_t] = prediction_error
 
-                # update reward values
+                # update Q values
                 if self.alpha > 0:
                     Q[a] = Q[a] + (prediction_error) * self.alpha    #contsant step-size
                 else:
@@ -215,19 +243,78 @@ class EG_Bandit(Bandit):
                 
                 # Save reward
                 self.total_rewards[time_t] += reward
-                chosen_arm[time_t] = a + 1          # record proper arm chosen
+                rewards_arr[time_t] = reward
+                chosen_arm[time_t] = a                               # record proper arm chosen
 
                 # record if action is best action
                 if a == best_action:                
                     self.total_actions[time_t] += 1
 
-        self.avg_rewards = np.divide(self.total_rewards, num_sim)
-        self.avg_actions = np.divide(self.total_actions, num_sim)
+            # Update Model Matrices
+            self.selection_matrix[i] = chosen_arm
+            self.reward_matrix[i] = rewards_arr
+            self.predictionErr_matrix[i] = prediction_error_arr
+
+        self.avg_rewards = np.divide(self.total_rewards, num_problems)
+        self.avg_actions = np.divide(self.total_actions, num_problems)
 
         self.final_N = N        # Final Arm tally on last trial
 
         if save == True:
             save_data("rewards.csv", chosen_arm, self.avg_rewards)
+    
+    def simulate_LL(self, num_problems=1000, save=False) -> None:
+        self.total_LL_array = np.zeros(num_problems)        # stores the LL sum of each problem
+
+        for i in tqdm(range(num_problems)):
+            LL_array = np.zeros(shape=[self.steps])
+            qValue = np.zeros(self.k) * self.initial_Q
+
+            for time_t in range(self.steps):
+
+                # Find actual selection
+                selection = int(self.total_actions[time_t])     # TODO: FIX! selection must be chosen arm at time_t (between 0 and 9)
+
+                if selection == -1:
+                    LL_array[time_t] = 1
+
+                else:
+                    # Compute eGreedy values
+
+                    greedy_result = (self.epsilon/(len(qValue)-1)) * np.ones(shape=len(qValue))
+
+                    # Convert Q value array to list
+                    qValueList = qValue.tolist()
+
+                    # Find max choice
+                    maxLoc = qValueList.index(max(qValueList))
+
+                    # Find greedy arm
+                    greedy_result[maxLoc] = 1-self.epsilon
+
+                    # compute reward
+                    reward = self.total_rewards[time_t]
+
+                    # compute prediction error
+                    predError = reward - qValue[selection]
+
+                    # Update reward - Non-stationary
+                    qValue[selection] = qValue[selection] + self.alpha * predError
+
+                    # Compute Likelihood
+                    LL_array[time_t] = greedy_result[selection]
+
+                    if LL_array[time_t] <= 0:
+                        LL_array[time_t] = 1e+300
+
+            # Deal with Nans
+            LL_array[np.isnan(LL_array)] = 1e+300
+
+            # update likelihood values
+            LL_array_sum = -np.sum(np.log(LL_array))
+            self.total_LL_array[i] = LL_array_sum
+
+
     
     def show_results(self, *args):
         print("="*30)
@@ -268,18 +355,18 @@ class SM_Bandit(Bandit):
         super().__init__(model_params, trial_params, reward_values, start_val)
         self.model_type = "Softmax"
 
-        self.k = trial_params[0]
-        self.steps = trial_params[1]
+        self.k = trial_params[0]        # number of arms
+        self.steps = trial_params[1]    # number of steps the agent takes
 
-        self.alpha = model_params[0]
-        self.temp = model_params[1]
+        self.alpha = model_params[0]    # learning param
+        self.temp = model_params[1]     # temperature param
 
-        self.q_star = reward_values
-        self.initial_Q = start_val
+        self.q_star = reward_values     # reward values
+        self.initial_Q = start_val      # initial q
 
 
-    def simulate(self, num_sim=1000, save=False) -> None:
-        for i in tqdm(range(num_sim)):
+    def simulate(self, num_problems=1000, save=False) -> None:
+        for i in tqdm(range(num_problems)):
             Q = np.ones(self.k) * self.initial_Q
             N = np.zeros(self.k)
 
@@ -308,8 +395,8 @@ class SM_Bandit(Bandit):
                 if a == best_action:
                     self.total_actions[time_t] += 1
 
-        self.avg_rewards = np.divide(self.total_rewards, num_sim)
-        self.avg_actions = np.divide(self.total_actions, num_sim)
+        self.avg_rewards = np.divide(self.total_rewards, num_problems)
+        self.avg_actions = np.divide(self.total_actions, num_problems)
 
         self.final_N = N        # Final Arm tally on last trial
 
@@ -345,6 +432,7 @@ class SM_Bandit(Bandit):
         plt.legend()
         plt.show()
     
+# TODO: Fix SMUCB bandit
 class SMUCB_Bandit(Bandit):
     """
     Incorporates a hybrid strategy: combines softmax probablistic random exploration
@@ -364,8 +452,8 @@ class SMUCB_Bandit(Bandit):
         self.q_star = reward_values
         self.initial_Q = start_val
     
-    def simulate(self, num_sim=1000, save=False) -> None:
-        for i in tqdm(range(num_sim)):
+    def simulate(self, num_problems=1000, save=False) -> None:
+        for i in tqdm(range(num_problems)):
             Q = np.ones(self.k) * self.initial_Q        #rewards per trial
             N = np.zeros(self.k)                        #actions/choices per trial
 
@@ -375,9 +463,8 @@ class SMUCB_Bandit(Bandit):
             for time_t in range(self.steps):
 
                 # Calculate uncertainty
-                a = SMUCB(Q, N, time_t, uncertParam=self.uncertainty_param, temp=self.temp)
+                a = SMUCB(Q, N, time_t, uncertParam=self.uncertainty_param, temp=self.temp)     #NOTE: Fix
                 print(a)
-                # Compute Softmax Values
         
 
                 reward = bandit(a, i, self.q_star)
@@ -393,10 +480,10 @@ class SMUCB_Bandit(Bandit):
                 chosen_arm[time_t] = a + 1
 
                 if a == best_action:
-                    self.total_actions[time_t] += 1
+                    self.total_actions[time_t] += 1         
 
-        self.avg_rewards = np.divide(self.total_rewards, num_sim)
-        self.avg_actions = np.divide(self.total_actions, num_sim)
+        self.avg_rewards = np.divide(self.total_rewards, num_problems)
+        self.avg_actions = np.divide(self.total_actions, num_problems)
 
         self.final_N = N        # Final Arm tally on last trial
 
