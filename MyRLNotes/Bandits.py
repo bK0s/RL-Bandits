@@ -42,8 +42,8 @@ def UCB(Q, N, t, confidence=2):
 
 def SMUCB(rewards, choices, trial, uncertParam, temp):
     print(choices.size)
-    last_arm_reward = np.zeros(shape=choices.size)
-    for i in range(choices.size):
+    last_arm_reward = np.zeros(shape=10)
+    for i in range(10):
         x = np.array(np.where(choices[0:trial] == i))
         if x.size == 0:
             last_arm_reward[i] = 0
@@ -215,7 +215,7 @@ class EG_Bandit(Bandit):
             best_action = np.argmax(self.q_star[i])     # select best action for trial i
 
             rewards_arr = np.zeros(self.steps)
-            chosen_arm = np.zeros(self.steps, dtype=int)
+            chosen_arm_arr = np.zeros(self.steps, dtype=int)
             prediction_error_arr = np.zeros(self.steps)
 
             # perform trial steps
@@ -244,14 +244,14 @@ class EG_Bandit(Bandit):
                 # Save reward
                 self.total_rewards[time_t] += reward
                 rewards_arr[time_t] = reward
-                chosen_arm[time_t] = a                               # record proper arm chosen
+                chosen_arm_arr[time_t] = a                               # record proper arm chosen
 
                 # record if action is best action
                 if a == best_action:                
                     self.total_actions[time_t] += 1
 
             # Update Model Matrices
-            self.selection_matrix[i] = chosen_arm
+            self.selection_matrix[i] = chosen_arm_arr
             self.reward_matrix[i] = rewards_arr
             self.predictionErr_matrix[i] = prediction_error_arr
 
@@ -261,7 +261,7 @@ class EG_Bandit(Bandit):
         self.final_N = N        # Final Arm tally on last trial
 
         if save == True:
-            save_data("rewards.csv", chosen_arm, self.avg_rewards)
+            save_data("rewards.csv", chosen_arm_arr, self.avg_rewards)
     
     def simulate_LL(self, num_problems=1000, save=False) -> None:
         self.total_LL_array = np.zeros(num_problems)        # stores the LL sum of each problem
@@ -453,34 +453,80 @@ class SMUCB_Bandit(Bandit):
         self.initial_Q = start_val
     
     def simulate(self, num_problems=1000, save=False) -> None:
+        
+        # Initialize Matrices
+        self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.predictionErr_matrix = np.empty(num_problems, dtype=np.ndarray)
+
+
         for i in tqdm(range(num_problems)):
-            Q = np.ones(self.k) * self.initial_Q        #rewards per trial
+            Q = np.ones(self.k) * self.initial_Q        #Initialize Q values
             N = np.zeros(self.k)                        #actions/choices per trial
 
             best_action = np.argmax(self.q_star[i])
-            chosen_arm = np.zeros(self.steps, dtype=int)
+
+            rewards_arr = np.zeros(self.steps)
+            chosen_arm_arr = np.zeros(self.steps, dtype=int)
+            prediction_error_arr = np.zeros(self.steps)
+
+            # needed for uncertainty calculation
+            n = 1
 
             for time_t in range(self.steps):
+                # print(chosen_arm_arr[i])
 
                 # Calculate uncertainty
-                a = SMUCB(Q, N, time_t, uncertParam=self.uncertainty_param, temp=self.temp)     #NOTE: Fix
-                print(a)
-        
+                # a = SMUCB(Q, chosen_arm_arr, n, uncertParam=self.uncertainty_param, temp=self.temp)     #NOTE: Fix
+                lastCount = np.zeros(shape=self.k)
+                for cTc in range(self.k):
+                    x = np.array(np.where(chosen_arm_arr[0:time_t] == cTc))
+                    if x.size == 0: 
+                        lastCount[cTc] = 0
+                    else:
+                        lastCount[cTc] = np.amax(x)
+                uncert = (self.uncertainty_param * (n - lastCount)) / 100
+                
+                num = np.exp(np.multiply(Q + uncert, self.temp))
 
+                denom = sum(np.exp(np.multiply(Q + uncert, self.temp)))
+
+                softmaxResult = num/denom
+
+                softmaxOptions = np.cumsum(softmaxResult) > np.random.rand()
+
+                a = np.argmax(softmaxOptions)
+
+                # print(a)
+        
+                # Get reward
                 reward = bandit(a, i, self.q_star)
+                 
+                # Update chosen arm tally 
                 N[a]+=1
+                chosen_arm_arr[time_t] = a
                 
                 # Get prediction error
                 prediction_error = reward - Q[a]
+                prediction_error_arr[time_t] = prediction_error
 
                 # Update Q
                 Q[a] = Q[a] + prediction_error * self.alpha
 
+                # Update n
+                n += 1
+
+                # Save reward
                 self.total_rewards[time_t] += reward
-                chosen_arm[time_t] = a + 1
+                rewards_arr[time_t] = reward
 
                 if a == best_action:
-                    self.total_actions[time_t] += 1         
+                    self.total_actions[time_t] += 1 
+
+            # Update Model Matrices
+            self.selection_matrix[i] = chosen_arm_arr
+            self.reward_matrix[i] = rewards_arr
+            self.predictionErr_matrix[i] = prediction_error_arr    
 
         self.avg_rewards = np.divide(self.total_rewards, num_problems)
         self.avg_actions = np.divide(self.total_actions, num_problems)
@@ -488,7 +534,7 @@ class SMUCB_Bandit(Bandit):
         self.final_N = N        # Final Arm tally on last trial
 
         if save == True:
-            save_data("rewards.csv", chosen_arm, self.avg_rewards)
+            save_data("rewards.csv", chosen_arm_arr, self.avg_rewards)
 
 
     def show_results(self):
