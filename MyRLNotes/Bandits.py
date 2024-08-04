@@ -1,5 +1,21 @@
 """
-Some code partially adapted from RL web-notes: https://www.kaggle.com/code/parsasam/reinforcement-learning-notes-multi-armed-bandits
+=========================================
+Title: Bandit Library
+Author: Bryan Kostelyk, Thomas Ferguson
+Licence: TBD
+=========================================
+
+Description:
+    Python library of customizable bandit Class, designed to simulate choice-reward tasks
+    with emphasis on the explore exploit-dilemna. 
+    
+    Current bandit variants:
+        -> e-Greedy
+        -> Softmax
+        -> SoftmaxUCB
+
+
+Some functions partially adapted from RL web-notes: https://www.kaggle.com/code/parsasam/reinforcement-learning-notes-multi-armed-bandits
 """
 
 import numpy as np
@@ -144,12 +160,7 @@ class Bandit():
     each bandit type.
     """
     def __init__(self, model_params, trial_params, reward_values, start_val) -> None:
-        # self.model_params = model_params
-        # self.trial_params = trial_params
-        # self.reward_values = reward_values
-        # self.start_val = start_val
-
-        #==========================================
+        self.model_params=model_params
 
         # NOTE: Total Actions should be total correct actions as it tracks the correct arm choices of all sims
         self.total_rewards = np.zeros(trial_params[1])      # rewards array
@@ -196,10 +207,7 @@ class EG_Bandit(Bandit):
         self.argmax_func = simple_max
 
     def simulate(self, num_problems=1000, save=False) -> None:
-        # init matrices
-        # self.selection_matrix = np.zeros([num_problems])
-        # self.reward_matrix = np.zeros([num_problems])
-        # self.predictionErr_matrix = np.zeros([num_problems])
+    
 
         self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
         self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
@@ -273,10 +281,10 @@ class EG_Bandit(Bandit):
             for time_t in range(self.steps):
 
                 # Find actual selection
-                selection = int(self.total_actions[time_t])     # TODO: FIX! selection must be chosen arm at time_t (between 0 and 9)
+                selection = int(self.selection_matrix[i][time_t])     # TODO: FIX! selection must be chosen arm at time_t (between 0 and 9)
 
                 if selection == -1:
-                    LL_array[time_t] = 1
+                    LL_array[time_t] = 1                    # NOTE: ????
 
                 else:
                     # Compute eGreedy values
@@ -366,12 +374,25 @@ class SM_Bandit(Bandit):
 
 
     def simulate(self, num_problems=1000, save=False) -> None:
+
+        self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.predictionErr_matrix = np.empty(num_problems, dtype=np.ndarray)
+
+
         for i in tqdm(range(num_problems)):
+            # Initialize Q-values
             Q = np.ones(self.k) * self.initial_Q
+            
+            # Initialie Arm
             N = np.zeros(self.k)
 
+
             best_action = np.argmax(self.q_star[i])
-            chosen_arm = np.zeros(self.steps, dtype=int)
+
+            rewards_arr = np.zeros(self.steps)
+            chosen_arm_arr = np.zeros(self.steps, dtype=int)
+            prediction_error_arr = np.zeros(self.steps)
 
             for time_t in range(self.steps):
 
@@ -385,15 +406,21 @@ class SM_Bandit(Bandit):
 
                 # Get prediction error
                 prediction_error = reward - Q[a]
+                prediction_error_arr[time_t] = prediction_error
 
                 # Update Q
                 Q[a] = Q[a] + prediction_error * self.alpha
                 
                 self.total_rewards[time_t] += reward
-                chosen_arm[time_t] = a + 1
+                chosen_arm_arr[time_t] = a
 
                 if a == best_action:
                     self.total_actions[time_t] += 1
+            
+            #Update Model Matrices
+            self.selection_matrix[i] = chosen_arm_arr
+            self.reward_matrix[i] = rewards_arr
+            self.predictionErr_matrix[i] = prediction_error_arr
 
         self.avg_rewards = np.divide(self.total_rewards, num_problems)
         self.avg_actions = np.divide(self.total_actions, num_problems)
@@ -401,7 +428,11 @@ class SM_Bandit(Bandit):
         self.final_N = N        # Final Arm tally on last trial
 
         if save == True:
-            save_data("rewards.csv", chosen_arm, self.avg_rewards)
+            save_data("rewards.csv", chosen_arm_arr, self.avg_rewards)
+
+    # TODO: Implement
+    def simulate_LL(self, num_problems=1000, save=False) -> None:
+        pass
     
     def show_results(self):
         print("="*30)
@@ -432,7 +463,7 @@ class SM_Bandit(Bandit):
         plt.legend()
         plt.show()
     
-# TODO: Fix SMUCB bandit
+# TODO: Optimize
 class SMUCB_Bandit(Bandit):
     """
     Incorporates a hybrid strategy: combines softmax probablistic random exploration
@@ -536,6 +567,10 @@ class SMUCB_Bandit(Bandit):
         if save == True:
             save_data("rewards.csv", chosen_arm_arr, self.avg_rewards)
 
+    # TODO: Implement
+    def simulate_LL(self, num_problems=1000, save=False) -> None:
+        pass
+
 
     def show_results(self):
         print("="*30)
@@ -557,9 +592,17 @@ class SMUCB_Bandit(Bandit):
         plt.legend()
         plt.show()
     
+    def show_actions(self):
+        plt.figure(figsize=(12,6))
+        plt.title(f"Action Selection ({self.model_type})")
+        plt.plot(self.avg_actions, "b", label=f"temp = {self.temp}")
+        plt.xlabel("Steps")
+        plt.ylabel("Action Selection")
+        plt.legend()
+        plt.show()
 
     
-def create_bandit_task(model_type, model_params, trial_params, reward_values, start_val):
+def create_bandit_task(model_type, model_params, trial_params, reward_values, start_val) -> Bandit:
     
     if model_type == "EG":
         return EG_Bandit(model_params, trial_params, reward_values, start_val)
@@ -569,3 +612,41 @@ def create_bandit_task(model_type, model_params, trial_params, reward_values, st
         return SMUCB_Bandit(model_params, trial_params, reward_values, start_val)
     else:
         raise ValueError("Model type not accepted")
+    
+def model_performance_summary(bandits: list[Bandit]):
+    fig, axs = plt.subplots(3,3, figsize=(12,12), dpi=500)
+    fig.suptitle("Simulated Performance", fontsize = 35)
+
+    for b in range(len(bandits)):
+        # Optimal arm choice
+        axs[b,0].plot(bandits[b].avg_actions, color='green')
+        axs[b,0].set_xlabel("Trials", fontsize=12)
+        axs[b,0].set_ylabel("Optimal Arm (%)", fontsize=12)
+        axs[b,0].set_ylim(0,1)
+        # axs[b,0].set_xticks()
+
+        # TODO: arm_switching
+
+        # Observed Rewardds
+        axs[b,1].set_title(bandits[b].model_type)
+        axs[b,1].plot(bandits[b].avg_rewards)
+        axs[b,1].set_xlabel("Trials", fontsize=12)
+        axs[b,1].set_ylabel("Observed Rewards", fontsize=12)
+
+        # Prediction Error
+        predErr = (np.average(bandits[b].predictionErr_matrix) * 100)
+        axs[b,2].plot(predErr, color="orange")
+        axs[b,2].set_xlabel("Trials", fontsize=12)
+        axs[b,2].set_ylabel("Prediction Error", fontsize=12)
+        axs[b,2].set_ylim(-100, 1)
+
+    plt.tight_layout()
+    plt.show()
+    
+
+# def parameter_recovery(bandits: list[Bandit], environment: Testbed , fit_attempts=5) -> None:
+#     reward_model_PR = np.zeros(shape=[len(bandits), num_problems, num_trial])
+#     choice_model_PR = np.zeros(shape=[len(bandits), num_problems, num_trial])
+
+#     for pCt in tqdm(range(num_problems)):
+
