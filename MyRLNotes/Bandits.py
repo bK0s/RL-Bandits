@@ -152,6 +152,18 @@ class Testbed():
     
     def show_mean(self):
         print(f"Testbed Means: {self.means}")
+    
+    def show_test_walk(self):
+        '''
+        Shows an example of the arm reward for a single given simulation
+        '''
+
+        plt.figure(figsize=(12,8))
+        plt.ylabel("Rewards")
+        plt.xlabel("Steps")
+        for i in range(len(self.arms)):
+            plt.plot(self.arms[i])
+        plt.show()
 
 
 class Bandit():
