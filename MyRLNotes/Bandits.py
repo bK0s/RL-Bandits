@@ -2,7 +2,7 @@
 =========================================
 Title: Bandit Library
 Author: Bryan Kostelyk, Thomas Ferguson
-Licence: TBD
+License: TBD
 =========================================
 
 Description:
@@ -443,8 +443,47 @@ class SM_Bandit(Bandit):
             save_data("rewards.csv", chosen_arm_arr, self.avg_rewards)
 
     # TODO: Implement
+    # NOTE: Occassional runtime overflow exception in softmax alg
     def simulate_LL(self, num_problems=1000, save=False) -> None:
-        pass
+        self.total_LL_array = np.zeros(num_problems)
+
+        for i in tqdm(range(num_problems)):
+            LL_array = np.zeros([self.steps])
+            qValue = np.zeros(self.k) * self.initial_Q
+
+            for time_t in range(self.steps):
+
+                selection = int(self.selection_matrix[i][time_t])
+
+                if selection == -1:
+                    LL_array[time_t] = 1
+                
+                else:
+                    #compute Softmax values
+                    num = np.exp(np.multiply(qValue, self.temp))
+                    denom = sum(np.exp(np.multiply(qValue, self.temp)))
+
+                    softmaxResult = num/denom
+                    
+                    reward = self.total_rewards[time_t]
+                    
+                    predError = reward - qValue[selection]
+                    
+                    # Update Reward – non-stationary
+                    qValue[selection] = qValue[selection] + self.alpha * predError
+
+                    # Compute Likelihood
+                    LL_array[time_t] = softmaxResult[selection]
+
+                    if LL_array[time_t] <= 0:
+                        LL_array[time_t] = 1e+300
+            
+            #Deal with Nans
+            LL_array[np.isnan(LL_array)] = 1e+300
+
+            #Update Likelihood values
+            LL_array_sum = -np.sum(np.log(LL_array))
+            self.total_LL_array[i] = LL_array_sum
     
     def show_results(self):
         print("="*30)
@@ -581,7 +620,58 @@ class SMUCB_Bandit(Bandit):
 
     # TODO: Implement
     def simulate_LL(self, num_problems=1000, save=False) -> None:
-        pass
+        self.total_LL_array = np.zeros(num_problems)
+        n = 1
+
+        for i in tqdm(range(num_problems)):
+            LL_array = np.zeros(shape=[self.steps])
+            qValue = np.zeros(self.k) * self.initial_Q
+
+            for time_t in range(self.steps):
+                selection = int(self.selection_matrix[i][time_t])
+
+                if selection == -1:
+                    LL_array[time_t] = 1
+
+                else:
+                    # Version from S&K 2015
+                    lastcount = np.zeros(shape=self.k)
+                    for cTc in range(self.k):
+                        x = np.array(np.where(self.selection_matrix[i][0:time_t]))
+                        if x.size == 0:
+                            lastcount[cTc] = 0
+                        else:
+                            lastcount = np.amax(x)
+
+                    uncert = (self.uncertainty_param * (n - lastcount))
+
+                    # Calculate sm probabilities
+                    num = np.exp(np.multiply(qValue + uncert, self.temp))
+                    denom = sum(np.exp(np.multiply(qValue + uncert, self.temp)))
+
+                    # Find softmax result
+                    softmaxResult = num/denom
+
+                    reward = self.reward_matrix[i][time_t]
+
+                    # Compute Prediction error
+                    predError = reward - qValue[selection]
+                    
+                    # Update Reward
+                    qValue[selection] = qValue[selection] + self.alpha * predError
+
+                    # Compute Likelihood array
+                    LL_array[time_t] = softmaxResult[selection]
+
+                    if LL_array[time_t] <= 0:
+                        LL_array[time_t] = 1e300
+            
+            # Deal With Nans
+            LL_array[np.isnan(LL_array)] = 1e+300
+
+            # Update Likelihood vals
+            LL_array_sum = -np.sum(np.log(LL_array))
+            self.total_LL_array[i] = LL_array_sum
 
 
     def show_results(self):
