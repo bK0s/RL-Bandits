@@ -126,15 +126,15 @@ class Testbed():
     different reward distrubutions to sample from depending on which trial is 
     in progress
     '''
-    def __init__(self, k=10, num_sim=1000) -> None:
+    def __init__(self, k=10, num_problems=1000) -> None:
         self.k = k
-        self.num_problems = num_sim
+        self.num_problems = num_problems
 
         self.arms = [0] * k
-        self.q_star = np.random.normal(0, 1, (num_sim, k)) #Random sample with mean=0, stddev=1
+        self.q_star = np.random.normal(0, 1, (num_problems, k)) #Random sample with mean=0, stddev=1
 
         for i in range(k):
-            self.arms[i] = np.random.normal(self.q_star[0,i], 1, num_sim)
+            self.arms[i] = np.random.normal(self.q_star[0,i], 1, num_problems) # NOTE: Displays what the reward distribution could look like
         
         self.means = [np.mean(d) for d in self.arms]
     
