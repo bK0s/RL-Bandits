@@ -1,9 +1,9 @@
 # RL Bandit Workbook
 ## Overview
-This library serves as a simple way to use pre-existing bandit algorithms for data science inside of a python notebook.
+This library serves as a simple way to use pre-existing bandit algorithms for data science inside a python notebook.
 There are two primary files with the RLNotes folder:
     1. Bandits.py – contains Bandit and environment classes as well as general use functions
-    2. RLNotebook.ipynb – contains python notebook with detailed example of how the implentation works inside of a pynb
+    2. RLNotebook.ipynb – contains python notebook with detailed example of how the implementation works inside a pynb
 
 ## Installation
 First, clone this repository. Then navigate to `RLNotes/` folder. Inside this folder, it is recommended you create a venv before installing the required python libraries.
