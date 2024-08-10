@@ -6,7 +6,7 @@ There are two primary files with the RLNotes folder:
     2. RLNotebook.ipynb – contains python notebook with detailed example of how the implentation works inside of a pynb
 
 ## Installation
-First, clone this repository. Then navigate to `RLNotes` folder. Inside this folder, it is recommended you create a venv before installing the required python libraries.
+First, clone this repository. Then navigate to `RLNotes/` folder. Inside this folder, it is recommended you create a venv before installing the required python libraries.
 For instructions on setting up your virtual environment, see https://www.freecodecamp.org/news/how-to-setup-virtual-environments-in-python
 
 Once you have your venv activated, install the required libraries by running the following command:
