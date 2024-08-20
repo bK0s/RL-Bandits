@@ -118,40 +118,73 @@ def paramCreate(num):
     paraCreate[:,6] = np.random.gamma(1.1, 1.1, size=num)   #SMUCB - Uncertainty
 
 
-
-class Testbed():
+# TODO: Add functional Stationarity flag for non-stationary environments
+class Testbed(object):
     '''
     Creates a testing environment with k arms and num_sim number of trials
     ie. k=10, num_sim=1000 will generate a testbed with 10 arms, each with 1000
     different reward distrubutions to sample from depending on which trial is 
     in progress
     '''
-    def __init__(self, k=10, num_problems=1000) -> None:
+    def __init__(self, k=10, num_problems=1000, stationary=True ) -> None:
         self.k = k
         self.num_problems = num_problems
 
-        self.arms = [0] * k
-        self.q_star = np.random.normal(0, 1, (num_problems, k)) #Random sample with mean=0, stddev=1
+        self.stationary = stationary
 
-        for i in range(k):
-            self.arms[i] = np.random.normal(self.q_star[0,i], 1, num_problems) # NOTE: Displays what the reward distribution could look like
-        
-        self.means = [np.mean(d) for d in self.arms]
+        self.arms = [0] * k
+        # self.q_star = np.random.normal(0, 1, (num_problems, k)) #Random sample with mean=0, stddev=1
+        self.q_star = np.random.normal(0, 1, size=k) #Random sample with mean=0, stddev=1
+
+        self.optimal_arm = self.q_star.argmax()
+
+    def new(self) -> object:
+        return Testbed(self.k, self.num_problems, self.stationary)
     
-    def show_testbed(self):
-        plt.figure(figsize=(12,8))
-        plt.ylabel("Rewards Distribution")
-        plt.xlabel("Action")
-        plt.xticks(range(1,11))
-        plt.yticks(np.arange(-5,5,0.5))
-        plt.violinplot(self.arms, positions=(range(1,11)), showmedians=True)
-        for i in range(0,10):
-            plt.scatter(i+1, self.means[i])
-            plt.text(i+1.15, self.means[i], f"q*({i+1})")
-        plt.show()
+    def reset_true_value(self) -> None:
+        self.q_star = np.random.normal(0, 1, size=self.k)
+        self.optimal_arm = self.q_star.argmax()
+
+    
+    def generate_reward(self, arm):
+        """
+        returns a random value selected from a normal distrubution around the true value
+        of a given arm
+        """
+        if not self.stationary:
+            self.q_star += np.random.normal(0, scale=0.03, size=self.k)     # walk rewards
+            self.optimal_arm = self.q_star.argmax()
+        return np.random.normal(self.q_star[arm], scale=1)
+    
+
+    # def show_testbed(self):
+    #     plt.figure(figsize=(12,8))
+    #     plt.ylabel("Rewards Distribution")
+    #     plt.xlabel("Action")
+    #     plt.xticks(range(1,11))
+    #     plt.yticks(np.arange(-5,5,0.5))
+    #     # plt.violinplot(self.arms, positions=(range(1,11)), showmedians=True)
+    #     plt.plot(self.arms)
+    #     for i in range(0,10):
+    #         plt.scatter(i+1, self.means[i])
+    
+    #     plt.show()
     
     def show_mean(self):
-        print(f"Testbed Means: {self.means}")
+        print(f"Testbed Means: {self.q_star}")
+        plt.figure(figsize=(12,8))
+        plt.title("True Values", fontsize=14)
+        plt.xlabel("Arms")
+        plt.ylabel("Mean Reward")
+        plt.xticks(range(1,11))
+        plt.axhline(0, color="black", lw=1)
+        # plt.plot(self.q_star)
+        for i in range(0,10):
+            plt.scatter(i+1, self.q_star[i])
+            plt.text(i+1.15, self.q_star[i], f"q*({i+1}) = {self.q_star[i]:.3f}")
+        # for i in range(0,10):
+        #     plt.plot(self.q_star[i])
+        plt.show()
     
     def show_test_walk(self):
         '''
@@ -171,12 +204,16 @@ class Bandit():
     Parent Bandit class containing attrutes and method declarations used by
     each bandit type.
     """
-    def __init__(self, model_params, trial_params, reward_values, start_val) -> None:
+    def __init__(self, env: Testbed, model_params, steps, start_val) -> None:
+        self.env = env              # reference to env
+        self.k = env.k
+        self.steps = steps
+        
         self.model_params=model_params
 
         # NOTE: Total Actions should be total correct actions as it tracks the correct arm choices of all sims
-        self.total_rewards = np.zeros(trial_params[1])      # rewards array
-        self.total_actions = np.zeros(trial_params[1])      # Choices array
+        self.total_rewards = np.zeros(steps)      # rewards array
+        self.total_actions = np.zeros(steps)      # Choices array
 
         self.selection_matrix = None                        # Contains all choice data for each step in each agent/problem
         self.reward_matrix = None                           # Contains all reward data for each step in each agent/problem
@@ -203,17 +240,16 @@ class EG_Bandit(Bandit):
     eGreedy Bandit class that inherits all common attributes among the bandit models
     Key Parameters: Epsilon, Alpha (learning rate)
     """
-    def __init__(self, model_params, trial_params, reward_values, start_val) -> None:
-        super().__init__(model_params, trial_params, reward_values, start_val)
+    def __init__(self, env: Testbed, model_params, steps, start_val) -> None:
+        super().__init__(env, model_params, steps, start_val)
         self.model_type = "eGreedy"
 
-        self.k = trial_params[0]
-        self.steps = trial_params[1]
+
+        # self.steps = steps
 
         self.alpha = model_params[0]           # if no alpha is passed of alpha=0, alg uses 1/n by default
         self.epsilon = model_params[1]
 
-        self.q_star = reward_values
         self.initial_Q = start_val
 
         self.argmax_func = simple_max
@@ -227,12 +263,12 @@ class EG_Bandit(Bandit):
 
         for i in tqdm(range(num_problems)):
             # Initialize Q Values
-            Q = np.ones(self.k) * self.initial_Q    # Qvalue array
+            Q = np.ones(self.k) + self.initial_Q    # Qvalue array
 
             # Initialize arm choice array
             N = np.zeros(self.k)                    # number of times each arm is chosen (choices)
             
-            best_action = np.argmax(self.q_star[i])     # select best action for trial i
+            # best_action = np.argmax(self.q_star[i])     # select best action for trial i
 
             rewards_arr = np.zeros(self.steps)
             chosen_arm_arr = np.zeros(self.steps, dtype=int)
@@ -240,13 +276,16 @@ class EG_Bandit(Bandit):
 
             # perform trial steps
             for time_t in range(self.steps):
+                best_action = self.env.optimal_arm
+
                 if np.random.rand() < self.epsilon:
                     a = np.random.randint(self.k)         #Explore
                 else:
                     a = self.argmax_func(Q, N, time_t)    #epxloit using chosen argmax_func ie. take best choice
 
                 # get reward
-                reward = bandit(a, i, self.q_star)      
+                # reward = bandit(a, i, self.q_star)
+                reward = self.env.generate_reward(a)
 
                 # Update chosen arm
                 N[a] +=  1   
@@ -269,6 +308,9 @@ class EG_Bandit(Bandit):
                 # record if action is best action
                 if a == best_action:                
                     self.total_actions[time_t] += 1
+
+            # reset environment
+            self.env.reset_true_value()
 
             # Update Model Matrices
             self.selection_matrix[i] = chosen_arm_arr
@@ -293,7 +335,7 @@ class EG_Bandit(Bandit):
             for time_t in range(self.steps):
 
                 # Find actual selection
-                selection = int(self.selection_matrix[i][time_t])     # TODO: FIX! selection must be chosen arm at time_t (between 0 and 9)
+                selection = int(self.selection_matrix[i][time_t])     
 
                 if selection == -1:
                     LL_array[time_t] = 1                    # NOTE: ????
@@ -371,19 +413,15 @@ class EG_Bandit(Bandit):
     
     
 class SM_Bandit(Bandit):
-    def __init__(self, model_params, trial_params, reward_values, start_val) -> None:
-        super().__init__(model_params, trial_params, reward_values, start_val)
+    def __init__(self, env, model_params, steps, start_val) -> None:
+        super().__init__(env, model_params, steps, start_val)
         self.model_type = "Softmax"
-
-        self.k = trial_params[0]        # number of arms
-        self.steps = trial_params[1]    # number of steps the agent takes
 
         self.alpha = model_params[0]    # learning param
         self.temp = model_params[1]     # temperature param
 
-        self.q_star = reward_values     # reward values
+        # self.q_star = reward_values     # reward values
         self.initial_Q = start_val      # initial q
-
 
     def simulate(self, num_problems=1000, save=False) -> None:
 
@@ -394,26 +432,28 @@ class SM_Bandit(Bandit):
 
         for i in tqdm(range(num_problems)):
             # Initialize Q-values
-            Q = np.ones(self.k) * self.initial_Q
+            Q = np.ones(self.k) + self.initial_Q
             
             # Initialie Arm
             N = np.zeros(self.k)
 
 
-            best_action = np.argmax(self.q_star[i])
+            # best_action = np.argmax(self.q_star[i])
 
             rewards_arr = np.zeros(self.steps)
             chosen_arm_arr = np.zeros(self.steps, dtype=int)
             prediction_error_arr = np.zeros(self.steps)
 
             for time_t in range(self.steps):
+                best_action = self.env.optimal_arm
 
                 # Choose arm
                 a = softmax(Q, (self.temp))
                 # print(a)
 
                 # Get reward
-                reward = bandit(a, i, self.q_star)
+                # reward = bandit(a, i, self.q_star)
+                reward = self.env.generate_reward(a)
                 N[a]+=1
 
                 # Get prediction error
@@ -428,6 +468,9 @@ class SM_Bandit(Bandit):
 
                 if a == best_action:
                     self.total_actions[time_t] += 1
+
+            # reset environment    
+            self.env.reset_true_value()
             
             #Update Model Matrices
             self.selection_matrix[i] = chosen_arm_arr
@@ -520,18 +563,14 @@ class SMUCB_Bandit(Bandit):
     Incorporates a hybrid strategy: combines softmax probablistic random exploration
     with directed exploration (operationalized as uncertainty reduction)
     """
-    def __init__(self, model_params, trial_params, reward_values, start_val) -> None:
-        super().__init__(model_params, trial_params, reward_values, start_val)
+    def __init__(self, env, model_params, steps, start_val) -> None:
+        super().__init__(env, model_params, steps, start_val)
         self.model_type = "Softmax-UCB"
-
-        self.k = trial_params[0]
-        self.steps = trial_params[1]
 
         self.alpha = model_params[0]
         self.temp = model_params[1]
         self.uncertainty_param = model_params[2]
 
-        self.q_star = reward_values
         self.initial_Q = start_val
     
     def simulate(self, num_problems=1000, save=False) -> None:
@@ -546,7 +585,7 @@ class SMUCB_Bandit(Bandit):
             Q = np.ones(self.k) * self.initial_Q        #Initialize Q values
             N = np.zeros(self.k)                        #actions/choices per trial
 
-            best_action = np.argmax(self.q_star[i])
+            # best_action = np.argmax(self.q_star[i])
 
             rewards_arr = np.zeros(self.steps)
             chosen_arm_arr = np.zeros(self.steps, dtype=int)
@@ -556,6 +595,7 @@ class SMUCB_Bandit(Bandit):
             n = 1
 
             for time_t in range(self.steps):
+                best_action = self.env.optimal_arm
                 # print(chosen_arm_arr[i])
 
                 # Calculate uncertainty
@@ -582,7 +622,7 @@ class SMUCB_Bandit(Bandit):
                 # print(a)
         
                 # Get reward
-                reward = bandit(a, i, self.q_star)
+                reward = self.env.generate_reward(a)
                  
                 # Update chosen arm tally 
                 N[a]+=1
@@ -604,6 +644,9 @@ class SMUCB_Bandit(Bandit):
 
                 if a == best_action:
                     self.total_actions[time_t] += 1 
+            
+            # reset environment
+            self.env.reset_true_value()
 
             # Update Model Matrices
             self.selection_matrix[i] = chosen_arm_arr
@@ -703,15 +746,55 @@ class SMUCB_Bandit(Bandit):
         plt.legend()
         plt.show()
 
+class VKF_Bandit(Bandit):
+    """
+    Volatile Kalman Filter Model
+    (Measure -> Update -> Predict)
+
+    Description: Computes mean and variance of the posterior distrubution of true average reward at time t
+    https://speekenbrink-lab.github.io/modelling/2019/02/28/fit_kf_rl_1.html
+    """
+    def __init__(self, model_params, trial_params, start_val) -> None:
+        super().__init__(model_params, trial_params, start_val)
+        self.model_type = "Volatile Kalman Filter"
+
+        self.k = trial_params[0]
+        self.steps = trial_params[1]
+
+        self.process_uncertainty = model_params[0]  # constant and does not change
+        self.observation_noise = model_params[1]    # constant and does not change
+        self.volatility_update_rate = model_params[2]   # Lamda
+        self.initial_volatility = model_params[3]       # v_0
+
+        self.q_star = reward_values
+        self.initial_Q = start_val
+
+    def simulate(self, num_problems=1000, save=False) -> None:
+        
+        self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.predictionErr_matrix = np.empty(num_problems, dtype=np.ndarray)
+
+        for i in tqdm(range(num_problems)):
+            for time_t in range(self.steps):
+                pass
+
+    def simulate_LL(self, num_problems=1000, save=False) -> None:
+        return super().simulate_LL(num_problems, save)
+
+    def show_results(self):
+        pass
     
-def create_bandit_task(model_type, model_params, trial_params, reward_values, start_val) -> Bandit:
+def create_bandit_task(model_type, env, model_params, steps, start_val) -> Bandit:
     
     if model_type == "EG":
-        return EG_Bandit(model_params, trial_params, reward_values, start_val)
+        return EG_Bandit(env, model_params, steps, start_val)
     elif model_type == "SM":
-        return SM_Bandit(model_params, trial_params, reward_values, start_val)
+        return SM_Bandit(env, model_params, steps, start_val)
     elif model_type == "SMUCB":
-        return SMUCB_Bandit(model_params, trial_params, reward_values, start_val)
+        return SMUCB_Bandit(env, model_params, steps, start_val)
+    elif model_type == "VKF":
+        return VKF_Bandit(env, model_params, steps, start_val)
     else:
         raise ValueError("Model type not accepted")
     
@@ -740,7 +823,7 @@ def model_performance_summary(bandits: list[Bandit]):
         axs[b,2].plot(predErr, color="orange")
         axs[b,2].set_xlabel("Trials", fontsize=12)
         axs[b,2].set_ylabel("Prediction Error", fontsize=12)
-        axs[b,2].set_ylim(-100, 1)
+        axs[b,2].set_ylim(-100, 5)
 
     plt.tight_layout()
     plt.show()
