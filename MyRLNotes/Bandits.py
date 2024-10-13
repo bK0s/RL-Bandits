@@ -18,6 +18,8 @@ Description:
 Some functions partially adapted from RL web-notes: https://www.kaggle.com/code/parsasam/reinforcement-learning-notes-multi-armed-bandits
 """
 
+from calendar import c
+from re import L
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import model_selection
@@ -47,7 +49,7 @@ def save_data(filename, arms, rewards):
     df.to_csv(filename, index=False)
 
 # Action selection funct
-def simple_max(Q, N, t):
+def simple_max(Q):
     return np.random.choice(np.flatnonzero(Q == Q.max()))   # Break ties at random
 
 def UCB(Q, N, t, confidence=2):
@@ -76,7 +78,8 @@ def SMUCB(rewards, choices, trial, uncertParam, temp):
 def softmax(qVal, temp):
     num = np.exp(np.multiply(qVal, temp))
     denom = sum(np.exp(np.multiply(qVal, temp)))
-    return np.argmax(np.cumsum(num / denom) > np.random.rand()) # return max arg where max value is less than a randdom value chosen from a uniform distrubution
+    choice = np.argmax(np.cumsum(num / denom) > np.random.rand()) # return max arg where max value is less than a randdom value chosen from a uniform distrubution
+    return choice, qVal[choice]
 
 # TODO: Fix LL function
 def loglik_vect(x, *args):
@@ -139,6 +142,9 @@ class Testbed(object):
         self.optimal_arm = self.q_star.argmax()
 
     def new(self) -> object:
+        """
+        Returns a new Testbed object
+        """
         return Testbed(self.k, self.num_problems, self.stationary)
     
     def reset_true_value(self) -> None:
@@ -263,7 +269,7 @@ class EG_Bandit(Bandit):
 
         for i in tqdm(range(num_problems)):
             # Initialize Q Values
-            Q = np.ones(self.k) + self.initial_Q    # Qvalue array
+            Q = np.zeros(self.k) + self.initial_Q    # Qvalue array
 
             # Initialize arm choice array
             N = np.zeros(self.k)                    # number of times each arm is chosen (choices)
@@ -281,7 +287,7 @@ class EG_Bandit(Bandit):
                 if np.random.rand() < self.epsilon:
                     a = np.random.randint(self.k)         #Explore
                 else:
-                    a = self.argmax_func(Q, N, time_t)    #epxloit using chosen argmax_func ie. take best choice
+                    a = self.argmax_func(Q)    #epxloit using chosen argmax_func ie. take best choice
 
                 # get reward
                 # reward = bandit(a, i, self.q_star)
@@ -355,7 +361,7 @@ class EG_Bandit(Bandit):
                     greedy_result[maxLoc] = 1-self.epsilon
 
                     # compute reward
-                    reward = self.total_rewards[time_t]
+                    reward = self.reward_matrix[i][time_t]
 
                     # compute prediction error
                     predError = reward - qValue[selection]
@@ -366,11 +372,11 @@ class EG_Bandit(Bandit):
                     # Compute Likelihood
                     LL_array[time_t] = greedy_result[selection]
 
-                    if LL_array[time_t] <= 0:
-                        LL_array[time_t] = 1e+300
+                    # if LL_array[time_t] <= 0:
+                    #     LL_array[time_t] = 1e+300
 
             # Deal with Nans
-            LL_array[np.isnan(LL_array)] = 1e+300
+            # LL_array[np.isnan(LL_array)] = 1e+300
 
             # update likelihood values
             LL_array_sum = -np.sum(np.log(LL_array))
@@ -432,9 +438,9 @@ class SM_Bandit(Bandit):
 
         for i in tqdm(range(num_problems)):
             # Initialize Q-values
-            Q = np.ones(self.k) + self.initial_Q
+            Q = np.zeros(self.k) + self.initial_Q
             
-            # Initialie Arm
+            # Initialize Arm
             N = np.zeros(self.k)
 
 
@@ -448,7 +454,7 @@ class SM_Bandit(Bandit):
                 best_action = self.env.optimal_arm
 
                 # Choose arm
-                a = softmax(Q, (self.temp))
+                a, _ = softmax(Q, (self.temp))
                 # print(a)
 
                 # Get reward
@@ -754,36 +760,176 @@ class VKF_Bandit(Bandit):
     Description: Computes mean and variance of the posterior distrubution of true average reward at time t
     https://speekenbrink-lab.github.io/modelling/2019/02/28/fit_kf_rl_1.html
     """
-    def __init__(self, model_params, trial_params, start_val) -> None:
-        super().__init__(model_params, trial_params, start_val)
+    def __init__(self, env, model_params, trial_params, start_val) -> None:
+        super().__init__(env, model_params, trial_params, start_val)
         self.model_type = "Volatile Kalman Filter"
 
-        self.k = trial_params[0]
-        self.steps = trial_params[1]
+        # self.k = trial_params[0]
+        # self.steps = trial_params[1]
 
-        self.process_uncertainty = model_params[0]  # constant and does not change
-        self.observation_noise = model_params[1]    # constant and does not change
-        self.volatility_update_rate = model_params[2]   # Lamda
-        self.initial_volatility = model_params[3]       # v_0
+        # self. = model_params[0]  # constant and does not change
+        self.observation_noise = model_params[0]    # constant and does not change
+        self.lamda = model_params[1]   # Volatility update param | Constrained to unit range
 
-        self.q_star = reward_values
-        self.initial_Q = start_val
+        self.initial_volatility = model_params[2]       # v_0
+        self.initial_posterior_mean = model_params[3]        # <----------------------
+        self.initial_posterior_var = model_params[4]        # <----------------------
+
+        self.temp = model_params[5]
+
+        self.intitial_Q = start_val
+
 
     def simulate(self, num_problems=1000, save=False) -> None:
+        self.num_problems = num_problems
         
         self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
         self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
-        self.predictionErr_matrix = np.empty(num_problems, dtype=np.ndarray)
+        self.volatility_matrix = np.empty(num_problems, dtype=np.ndarray)       # Prediction error
 
         for i in tqdm(range(num_problems)):
-            for time_t in range(self.steps):
-                pass
+            Q = np.ones(self.k) + self.intitial_Q
+            N = np.zeros(self.k) 
 
-    def simulate_LL(self, num_problems=1000, save=False) -> None:
-        return super().simulate_LL(num_problems, save)
+            rewards_arr =  np.zeros(self.steps)
+            chosen_arm_arr = np.zeros(self.steps, dtype=int)
+
+            volatility_arr = np.zeros(self.steps) + self.initial_volatility
+            posterior_mean_arr = np.zeros(self.steps) + self.initial_posterior_mean
+            posterior_variance_arr = np.zeros(self.steps) + self.initial_posterior_var
+
+            posterior_mean = self.initial_posterior_mean
+            posterior_variance = self.initial_posterior_var
+            volatility = self.initial_volatility
+            
+            for time_t in range(self.steps):
+                best_action = self.env.optimal_arm
+
+
+                # Action Selection
+                # a = simple_max(Q)
+                a, _ = softmax(Q, self.temp)                              # NOTE: Function softmax
+                N[a] += 1
+                chosen_arm_arr[time_t] = a
+
+                outcome =  self.env.generate_reward(a)
+                rewards_arr[time_t] = outcome
+                self.total_rewards[time_t] += outcome
+
+                kalman_gain = np.divide(posterior_variance + volatility, posterior_variance + volatility + np.square(self.observation_noise)) 
+                
+                # Mean update
+                posterior_mean_new = posterior_mean + kalman_gain * (outcome - posterior_mean)
+                
+                # Posterior variance update
+                posterior_variance_new = (1 - kalman_gain) * (posterior_variance + volatility)
+                
+                # Covariance Update
+                posterior_covariance = (1 - kalman_gain) * posterior_variance
+
+                # Volatility Update
+                volatility = volatility + self.lamda * ((np.square(posterior_mean_new - posterior_mean) + posterior_variance + posterior_variance_new - 2 * posterior_covariance - volatility))
+
+                #Update
+                Q[a] = Q[a] + posterior_mean_new + posterior_variance_new
+
+                if a == best_action:
+                    self.total_actions[time_t] += 1
+
+            # Reset env
+            self.env.reset_true_value()
+
+            # Update Model Matrices
+            self.selection_matrix[i] = chosen_arm_arr
+            self.reward_matrix[i] = rewards_arr
+            self.volatility_matrix[i] = volatility_arr
+
+        self.avg_rewards = np.divide(self.total_rewards, num_problems)
+        self.avg_actions = np.divide(self.total_actions, num_problems)
+
+    def LL_VKF(self, lamda, initial_V, temp) -> int:        # Parameters to be fitted
+        likelihood_sum_arr = np.empty(self.num_problems, np.ndarray)
+
+        for i in tqdm(range(self.num_problems)):
+            q_value = np.zeros(self.k) + self.intitial_Q
+            likelihood_array = np.zeros(self.steps)
+
+            volatility_update = lamda
+            volatility = initial_V
+
+            posterior_mean = self.initial_posterior_mean
+            posterior_variance = self.initial_posterior_var
+            observation_noise = self.observation_noise
+
+            for j in range(len(self.selection_matrix[i])):
+                choice = self.selection_matrix[i][j]
+                reward = self.reward_matrix[i][j]
+
+                _, softmax_result = softmax(q_value, temp)
+                # print(_,softmax_result)
+                
+                kalman_gain = np.divide(posterior_variance + volatility, posterior_variance + volatility + np.square(observation_noise))
+                
+                 # Mean update
+                posterior_mean_new = posterior_mean + kalman_gain * (reward - posterior_mean)
+                
+                # Posterior variance update
+                posterior_variance_new = (1 - kalman_gain) * (posterior_variance + volatility)
+                
+                # Covariance Update
+                posterior_covariance = (1 - kalman_gain) * posterior_variance
+
+                # Volatility Update
+                volatility = volatility + volatility_update * ((np.square(posterior_mean_new - posterior_mean) + posterior_variance + posterior_variance_new - 2 * posterior_covariance - volatility))
+
+                #Update
+                q_value[choice] = q_value[choice] + posterior_mean_new + posterior_variance_new
+
+                likelihood_array[j] = softmax_result
+                if likelihood_array[j] <= 0:
+                    likelihood_array[j] = 1e300
+            likelihood_array[np.isnan(likelihood_array)] = 1e+300
+
+            likelihood_sum = -np.sum(np.log(likelihood_array))
+            likelihood_sum_arr[i] = likelihood_sum
+            
+        
+        avg_likelihood_sum = np.average(likelihood_sum_arr)
+        
+        print(f"Average NLL Sum: {avg_likelihood_sum} after {i+1} times")
+        return avg_likelihood_sum
+    
+    def minimize_LL_VKF(self):
+        pass
+        
 
     def show_results(self):
-        pass
+        print("="*30)
+        print("Showing the following test: ",
+              f"Model name: {self.model_type}",
+              f"Action selection: {self.model_type} | temp = {self.temp}",
+              f"Number of arms: {self.k}",
+              f"Steps: {self.steps}",
+              f"Average reward: {np.average(self.avg_rewards)}",
+              sep="\n\t")
+        print("="*30)
+        plt.figure(figsize=(12,6))
+        plt.title(f"{self.model_type}")
+        plt.plot(self.avg_rewards, 'r', label=f'temp = {self.temp}')
+        plt.xlabel("Steps")
+        plt.ylabel("Average Reward")
+        plt.legend()
+        plt.show()
+    
+    def show_actions(self):
+        plt.figure(figsize=(12,6))
+        plt.title(f"Action Selection ({self.model_type})")
+        plt.plot(self.avg_actions, "b", label=f"temp = {self.temp}")
+        plt.xlabel("Steps")
+        plt.ylabel("Action Selection")
+        plt.legend()
+        plt.show()
+
     
 def create_bandit_task(model_type, env, model_params, steps, start_val) -> Bandit:
     
@@ -810,8 +956,6 @@ def model_performance_summary(bandits: list[Bandit]):
         axs[b,0].set_ylim(0,1)
         # axs[b,0].set_xticks()
 
-        # TODO: arm_switching
-
         # Observed Rewardds
         axs[b,1].set_title(bandits[b].model_type)
         axs[b,1].plot(bandits[b].avg_rewards)
@@ -828,10 +972,3 @@ def model_performance_summary(bandits: list[Bandit]):
     plt.tight_layout()
     plt.show()
     
-
-# def parameter_recovery(bandits: list[Bandit], environment: Testbed , fit_attempts=5) -> None:
-#     reward_model_PR = np.zeros(shape=[len(bandits), num_problems, num_trial])
-#     choice_model_PR = np.zeros(shape=[len(bandits), num_problems, num_trial])
-
-#     for pCt in tqdm(range(num_problems)):
-
