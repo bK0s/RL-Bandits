@@ -18,6 +18,7 @@ Description:
 Some functions partially adapted from RL web-notes: https://www.kaggle.com/code/parsasam/reinforcement-learning-notes-multi-armed-bandits
 """
 
+from ast import List
 from calendar import c
 from re import L, T
 import numpy as np
@@ -73,55 +74,21 @@ def SMUCB(rewards, choices, trial, uncertParam, temp):
     denom = sum(np.exp(np.multiply(rewards + uncert, temp)))
 
     return np.argmax(np.cumsum(num / denom) > np.random.rand())
-# def softmax_UCB(Q, N, t, temp)
+
 
 def softmax(qVal, temp):
+    '''
+    Function used to get softmax distrubution of choice probablity
+
+    @Parameters: numpy.array of qvals for given step, temperature param
+    @Returns: (Action/arm chosen, SM Probablitity of chosen arm)
+    '''
     num = np.exp(np.multiply(qVal, temp))
     denom = sum(np.exp(np.multiply(qVal, temp)))
     choice = np.argmax(np.cumsum(num / denom) > np.random.rand())
     return choice, num/denom
 
-# TODO: Fix LL function
-def loglik_vect(x, *args):
-    '''
-    From: https://www.pymc.io/projects/examples/en/latest/case_studies/reinforcement_learning.html#estimating-the-learning-parameters-via-maximum-likelihood
-    '''
-    alpha, beta = x
-    actions, rewards = args
 
-    Qs = np.ones((1000, 10), dtype="float64")
-    Qs[0] = 0.5
-
-    for time_t, (a, r) in enumerate(zip(actions[:-1], rewards[:-1])):
-        Qs[time_t + 1, a] = Qs[time_t, a] + alpha * (r - Qs[time_t, a])
-        Qs[time_t + 1, 1 - a] = Qs[time_t, 1 - a]
-
-    # apply softmax
-    return softmax(Qs)
-
-def paramCreate(num):
-    """
-    Generates random params for each of the models
-    (From TF notebook)
-    """
-
-    paraCreate = np.zeros(shape=[num, 7])
-
-    # eGreedy 
-    paraCreate[:,0] = np.random.beta(1.1, 1.1, size=num)    #EG - LR
-    paraCreate[:,1] = np.random.beta(1.1, 1.1, size=num)    #EG - Eps
-
-    # Softmax
-    paraCreate[:,2] = np.random.beta(1.1, 1.1, size=num)    #Rand - LR
-    paraCreate[:,3] = np.random.uniform(1, 30, size=num)    #SM - Temp
-
-    # Softmax Explore
-    paraCreate[:,4] = np.random.beta(1.1, 1.1, size=num)    #SMUCB - LR
-    paraCreate[:,5] = np.random.uniform(1, 30, size=num)    #SMUCB - Temp
-    paraCreate[:,6] = np.random.gamma(1.1, 1.1, size=num)   #SMUCB - Uncertainty
-
-
-# TODO: Add functional Stationarity flag for non-stationary environments
 class Testbed(object):
     '''
     Creates a testing environment with k arms and num_sim number of trials
@@ -143,18 +110,23 @@ class Testbed(object):
 
     def new(self) -> object:
         """
-        Returns a new Testbed object
+        @Returns: a new Testbed object with same number of arms, problems, and stationarity
         """
         return Testbed(self.k, self.num_problems, self.stationary)
     
     def reset_true_value(self) -> None:
+        """
+        Resets mean reward value for all choices
+        """
         self.q_star = np.random.normal(0, 1, size=self.k)
         self.optimal_arm = self.q_star.argmax()
 
     
     def generate_reward(self, arm):
         """
-        returns a random value selected from a normal distrubution around the true value
+        Given a choice from 1..K, selects an option to get reward from
+
+        @Returns: a random value selected from a normal distrubution around the true value
         of a given arm
         """
         if not self.stationary:
@@ -162,21 +134,11 @@ class Testbed(object):
             self.optimal_arm = self.q_star.argmax()
         return np.random.normal(self.q_star[arm], scale=1)
     
-
-    # def show_testbed(self):
-    #     plt.figure(figsize=(12,8))
-    #     plt.ylabel("Rewards Distribution")
-    #     plt.xlabel("Action")
-    #     plt.xticks(range(1,11))
-    #     plt.yticks(np.arange(-5,5,0.5))
-    #     # plt.violinplot(self.arms, positions=(range(1,11)), showmedians=True)
-    #     plt.plot(self.arms)
-    #     for i in range(0,10):
-    #         plt.scatter(i+1, self.means[i])
-    
-    #     plt.show()
     
     def show_mean(self):
+        """
+        Displays scatterplot of arms and their mean reward at the time
+        """
         print(f"Testbed Means: {self.q_star}")
         plt.figure(figsize=(12,8))
         plt.title("True Values", fontsize=14)
@@ -207,8 +169,8 @@ class Testbed(object):
 
 class Bandit():
     """
-    Parent Bandit class containing attrutes and method declarations used by
-    each bandit type.
+    Parent Bandit class containing attributes and method declarations used by
+    each bandit model.
     """
     def __init__(self, env: Testbed, model_params, steps, start_val) -> None:
         self.env = env              # reference to env
@@ -231,12 +193,22 @@ class Bandit():
         self.final_N = None
     
     def simulate(self, num_problems=1000, save=False) -> None:
+        """
+        Runs the given model instance <num_problems> amount of times
+        """
         pass
 
     def simulate_LL(self, num_problems=1000, save=False) -> None:
+        """
+        NOT IMPLEMENTED
+        """
         pass
 
     def show_results(self):
+        '''
+        Displays the average reward data for each step of a simulation over each problem.
+        If there is only one problem, then display raw reward data of that problem.
+        '''
         pass
     def show_actions(self):
         pass
@@ -246,7 +218,7 @@ class EG_Bandit(Bandit):
     eGreedy Bandit class that inherits all common attributes among the bandit models
     Key Parameters: Epsilon, Alpha (learning rate)
     """
-    def __init__(self, env: Testbed, model_params, steps, start_val) -> None:
+    def __init__(self, env: Testbed, model_params: List, steps, start_val) -> None:
         super().__init__(env, model_params, steps, start_val)
         self.model_type = "eGreedy"
 
@@ -261,7 +233,6 @@ class EG_Bandit(Bandit):
         self.argmax_func = simple_max
 
     def simulate(self, num_problems=1000, save=False) -> None:
-    
 
         self.selection_matrix = np.empty(num_problems, dtype=np.ndarray)
         self.reward_matrix = np.empty(num_problems, dtype=np.ndarray)
@@ -419,6 +390,9 @@ class EG_Bandit(Bandit):
     
     
 class SM_Bandit(Bandit):
+    """
+    Softmax Bandit variant
+    """
     def __init__(self, env, model_params, steps, start_val) -> None:
         super().__init__(env, model_params, steps, start_val)
         self.model_type = "Softmax"
@@ -850,6 +824,17 @@ class VKF_Bandit(Bandit):
         self.avg_actions = np.divide(self.total_actions, num_problems)
 
     def LL_VKF(self, lamda, initial_V, temp) -> np.float64:        # Parameters to be fitted
+        """
+        Negative Log Likelihood function for VKF variant
+        @Parameters: 
+            lamda: Volatility update parameter
+            initial_V: Initial volatility
+            temp: temperature parameter for softmax function
+        @Returns: 
+            Total Negative Log Likelihood of each choicegiven a set of parameters and choice reward data
+
+        Note: Current implementation will average NLL if provided a model with > 1 problems
+        """
         likelihood_sum_arr = np.empty(self.num_problems, np.ndarray)
 
         for i in range(self.num_problems):
@@ -905,6 +890,16 @@ class VKF_Bandit(Bandit):
         return avg_likelihood_sum
     
     def vary_param_NLL(self, p_update: str, interval:list, **parameters):
+        """
+        Function used to vary parameters used to test VKF_NLL.
+        @Parameters:
+            p_update: name of parameter to vary
+            interval: list containing values to test p_update with in the form [start,stop,step]
+            **parameters: list of keyword args defining the constant parameters
+        @Returns:
+            [0]: Array of Log Likelihood (Y)
+            [1]: Array of tested parameters (X)
+        """
         v_update = parameters["v_update"]
         v_init = parameters["v_init"]
         temp = parameters["temp"]
@@ -929,17 +924,20 @@ class VKF_Bandit(Bandit):
         return LL_arr, tested_parameters
     
     def plot_parameter_likelihood(self, *args, **kwargs):
+        """
+        Plots the change in NLL of a model given a parameter and an interval to vary
+        @Parameters:
+            args: arguments of vary_param_NLL functions
+            kwargs: key-value pairs of constant parameters
+        """
         print("Plotting the following parameters:")
         plt.figure(figsize=(12,6))
         plt.title("VKF Parameter NLL")
-        # print(args, "\n", kwargs)
         data, parameters = self.vary_param_NLL(args[0], args[1], **kwargs)
-        print(data )
-        print(parameters)
-        print(args[1])
+        # print(data )
+        # print(parameters)
+        # print(args[1])
         plt.plot(parameters, data, 'g')
-        # plt.xticks(np.arange(*args[1]))
-        # plt.xscale()
         plt.xlabel(f"Parameter: {args[0]}")
         plt.ylabel("NLL")
         plt.show()
@@ -972,8 +970,18 @@ class VKF_Bandit(Bandit):
         plt.show()
 
     
-def create_bandit_task(model_type, env, model_params, steps, start_val) -> Bandit:
-    
+def create_bandit_task(model_type:str , env:Testbed, model_params:List, steps:int, start_val:np.float64) -> Bandit:
+    """
+    Function that returns a Bandit object of model_type
+    @Parameters:
+        model_type: Initials of bandit model
+        env: Testbed object
+        model_params: list of parameters specific to the model_type
+        steps: number of choices agent will make
+        start_val: initial choice value
+    @Returns:
+        Bandit Object
+    """
     if model_type == "EG":
         return EG_Bandit(env, model_params, steps, start_val)
     elif model_type == "SM":
@@ -986,6 +994,9 @@ def create_bandit_task(model_type, env, model_params, steps, start_val) -> Bandi
         raise ValueError("Model type not accepted")
     
 def model_performance_summary(bandits: list[Bandit]):
+    """
+    INCOMPLETE
+    """
     fig, axs = plt.subplots(3,3, figsize=(12,12), dpi=500)
     fig.suptitle("Simulated Performance", fontsize = 35)
 
