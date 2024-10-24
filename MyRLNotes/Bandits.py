@@ -19,13 +19,13 @@ Some functions partially adapted from RL web-notes: https://www.kaggle.com/code/
 """
 
 from calendar import c
-from re import L
+from re import L, T
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import model_selection
 from tqdm import tqdm
 import pandas as pd
-import scipy
+from scipy.optimize import minimize
 
 
 # Bandit
@@ -78,8 +78,8 @@ def SMUCB(rewards, choices, trial, uncertParam, temp):
 def softmax(qVal, temp):
     num = np.exp(np.multiply(qVal, temp))
     denom = sum(np.exp(np.multiply(qVal, temp)))
-    choice = np.argmax(np.cumsum(num / denom) > np.random.rand()) # return max arg where max value is less than a randdom value chosen from a uniform distrubution
-    return choice, qVal[choice]
+    choice = np.argmax(np.cumsum(num / denom) > np.random.rand())
+    return choice, num/denom
 
 # TODO: Fix LL function
 def loglik_vect(x, *args):
@@ -182,10 +182,10 @@ class Testbed(object):
         plt.title("True Values", fontsize=14)
         plt.xlabel("Arms")
         plt.ylabel("Mean Reward")
-        plt.xticks(range(1,11))
+        plt.xticks(range(1, self.k+1))
         plt.axhline(0, color="black", lw=1)
         # plt.plot(self.q_star)
-        for i in range(0,10):
+        for i in range(0,self.k):
             plt.scatter(i+1, self.q_star[i])
             plt.text(i+1.15, self.q_star[i], f"q*({i+1}) = {self.q_star[i]:.3f}")
         # for i in range(0,10):
@@ -830,8 +830,10 @@ class VKF_Bandit(Bandit):
                 # Volatility Update
                 volatility = volatility + self.lamda * ((np.square(posterior_mean_new - posterior_mean) + posterior_variance + posterior_variance_new - 2 * posterior_covariance - volatility))
 
-                #Update
-                Q[a] = Q[a] + posterior_mean_new + posterior_variance_new
+                # Update
+                # Q[a] = Q[a] + posterior_mean_new + posterior_variance_new
+                # Q[a] = posterior_mean_new + posterior_variance_new
+                Q[a] = posterior_mean_new
 
                 if a == best_action:
                     self.total_actions[time_t] += 1
@@ -847,10 +849,10 @@ class VKF_Bandit(Bandit):
         self.avg_rewards = np.divide(self.total_rewards, num_problems)
         self.avg_actions = np.divide(self.total_actions, num_problems)
 
-    def LL_VKF(self, lamda, initial_V, temp) -> int:        # Parameters to be fitted
+    def LL_VKF(self, lamda, initial_V, temp) -> np.float64:        # Parameters to be fitted
         likelihood_sum_arr = np.empty(self.num_problems, np.ndarray)
 
-        for i in tqdm(range(self.num_problems)):
+        for i in range(self.num_problems):
             q_value = np.zeros(self.k) + self.intitial_Q
             likelihood_array = np.zeros(self.steps)
 
@@ -865,9 +867,9 @@ class VKF_Bandit(Bandit):
                 choice = self.selection_matrix[i][j]
                 reward = self.reward_matrix[i][j]
 
-                _, softmax_result = softmax(q_value, temp)
+                _, sm = softmax(q_value, temp)
                 # print(_,softmax_result)
-                
+                softmax_result = sm[choice]
                 kalman_gain = np.divide(posterior_variance + volatility, posterior_variance + volatility + np.square(observation_noise))
                 
                  # Mean update
@@ -883,7 +885,9 @@ class VKF_Bandit(Bandit):
                 volatility = volatility + volatility_update * ((np.square(posterior_mean_new - posterior_mean) + posterior_variance + posterior_variance_new - 2 * posterior_covariance - volatility))
 
                 #Update
-                q_value[choice] = q_value[choice] + posterior_mean_new + posterior_variance_new
+                # q_value[choice] = q_value[choice] + posterior_mean_new + posterior_variance_new
+                # q_value[choice] = posterior_mean_new + posterior_variance_new
+                q_value[choice] = posterior_mean_new
 
                 likelihood_array[j] = softmax_result
                 if likelihood_array[j] <= 0:
@@ -893,15 +897,52 @@ class VKF_Bandit(Bandit):
             likelihood_sum = -np.sum(np.log(likelihood_array))
             likelihood_sum_arr[i] = likelihood_sum
             
-        
+        # return likelihood_sum_arr
+
         avg_likelihood_sum = np.average(likelihood_sum_arr)
         
-        print(f"Average NLL Sum: {avg_likelihood_sum} after {i+1} times")
+        # print(f"Average NLL Sum: {avg_likelihood_sum} after {i+1} times")
         return avg_likelihood_sum
     
-    def minimize_LL_VKF(self):
-        pass
-        
+    def vary_param_NLL(self, p_update: str, interval:list, **parameters):
+        v_update = parameters["v_update"]
+        v_init = parameters["v_init"]
+        temp = parameters["temp"]
+
+        start = interval[0]
+        stop = interval[1]
+        step = interval[2]
+
+        param_count = int((stop-start) // step)
+        print("number of parameters:\n", param_count)
+        LL_arr = np.zeros(shape=param_count)
+        tested_parameters = np.zeros(shape=param_count)
+
+
+        for i in tqdm(range(param_count)):
+            parameters[p_update] = start
+            # print()
+            LL_arr[i] = self.LL_VKF(parameters["v_update"], parameters["v_init"], parameters["temp"])
+            tested_parameters[i] = parameters[p_update]
+            start += step
+
+        return LL_arr, tested_parameters
+    
+    def plot_parameter_likelihood(self, *args, **kwargs):
+        print("Plotting the following parameters:")
+        plt.figure(figsize=(12,6))
+        plt.title("VKF Parameter NLL")
+        # print(args, "\n", kwargs)
+        data, parameters = self.vary_param_NLL(args[0], args[1], **kwargs)
+        print(data )
+        print(parameters)
+        print(args[1])
+        plt.plot(parameters, data, 'g')
+        # plt.xticks(np.arange(*args[1]))
+        # plt.xscale()
+        plt.xlabel(f"Parameter: {args[0]}")
+        plt.ylabel("NLL")
+        plt.show()
 
     def show_results(self):
         print("="*30)
