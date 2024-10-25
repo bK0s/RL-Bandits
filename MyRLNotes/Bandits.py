@@ -900,9 +900,6 @@ class VKF_Bandit(Bandit):
             [0]: Array of Log Likelihood (Y)
             [1]: Array of tested parameters (X)
         """
-        v_update = parameters["v_update"]
-        v_init = parameters["v_init"]
-        temp = parameters["temp"]
 
         start = interval[0]
         stop = interval[1]
@@ -923,7 +920,7 @@ class VKF_Bandit(Bandit):
 
         return LL_arr, tested_parameters
     
-    def plot_parameter_likelihood(self, *args, **kwargs):
+    def plot_parameter_likelihood(self, *args, **kwargs) -> None:
         """
         Plots the change in NLL of a model given a parameter and an interval to vary
         @Parameters:
@@ -970,7 +967,7 @@ class VKF_Bandit(Bandit):
         plt.show()
 
     
-def create_bandit_task(model_type:str , env:Testbed, model_params:List, steps:int, start_val:np.float64) -> Bandit:
+def create_bandit_task(model_type:str , env:Testbed, model_params:List, steps:int, start_val:np.float64) -> EG_Bandit | SM_Bandit | SMUCB_Bandit | VKF_Bandit:
     """
     Function that returns a Bandit object of model_type
     @Parameters:
